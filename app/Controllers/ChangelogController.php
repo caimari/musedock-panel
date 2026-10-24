@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.408',
+                'date' => '2026-10-22',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Aviso «PHP sin parchear»: cada nodo compara cada 6 horas su PHP con la versión corregida de cada rama (CVE-2026-109618/109619) y avisa con el comando para actualizar solo esa rama; también avisa de procesos (panel, Octane, Horizon) que siguen con el PHP viejo en memoria tras actualizar. Mínimos ajustables con php_min_versions.',
+                        'El aviso «Desincronización entre nodos» del Dashboard enseña las operaciones fallidas: el número de «Fallidos» abre una ventana con cada operación (nodo, acción, dominio, intentos, fecha y error) para decidir antes de pulsar «Sincronizar Todo».',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.407',
                 'date' => '2026-10-21',
                 'badge' => 'info',

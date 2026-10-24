@@ -108,6 +108,23 @@
     }
 ?>
 
+<?php if ($clusterRole !== 'slave' && (int)($queueStats['failed'] ?? 0) > 0): ?>
+<div class="alert alert-warning d-flex flex-wrap align-items-center gap-2 py-2 mb-3">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <span class="me-auto">
+        Hay <strong><?= (int)$queueStats['failed'] ?></strong> operación(es) de replicación fallida(s) que no se reintentan solas.
+        Mira cuáles son en la pestaña <strong>Cola</strong> y reinténtalas desde ahí: es más ligero que una sincronización completa.
+    </span>
+    <button type="button" class="btn btn-dark btn-sm" data-bs-toggle="tab" data-bs-target="#tab-cola"><i class="bi bi-list-ul me-1"></i>Ver la cola</button>
+    <?php if (\MuseDockPanel\Settings::get('cluster_fenced', '0') !== '1'): ?>
+    <form method="post" action="/settings/cluster/retry-queue" class="d-inline">
+        <?= View::csrf() ?>
+        <button type="submit" class="btn btn-outline-dark btn-sm"><i class="bi bi-arrow-repeat me-1"></i>Reintentar las fallidas</button>
+    </form>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
 <ul class="nav nav-pills cluster-tabs mb-3" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-estado" type="button" role="tab">

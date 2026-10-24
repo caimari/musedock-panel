@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.408] — 2026-10-22 — Aviso de PHP sin parchear
+
+### Añadido
+- **Aviso «PHP sin parchear» (Ajustes → Avisos):** cada nodo, incluidas réplicas y testigos, compara cada 6 horas el PHP instalado (paquetes `phpX.Y-cli/-fpm`) con la versión corregida de su rama (hoy CVE-2026-109618/109619: 8.1.34-9, 8.2.35, 8.3.36, 8.4.27, 8.5.12) y avisa con el comando para actualizar **solo esa rama**. También avisa de los **procesos que siguen con el binario viejo en memoria** tras actualizar (panel `php -S`, Octane, Horizon, websockets). Un solo aviso por cambio (y otro cada 72 h si sigue igual) y otro al quedar todo bien. Nació de que nitro llevaba desde febrero en 8.3.30 sin que nadie lo notara. Las versiones mínimas se cambian sin tocar código con el ajuste `php_min_versions` (`8.3=8.3.37,8.4=8.4.28`). Los paquetes de la distribución sin repositorio Sury no se comparan (arreglan sin subir el número). Solo lee: no instala ni reinicia nada. `PhpPatchService`, prueba `tests/php_patch_test.php` (14).
+- **El aviso amarillo «Desincronización entre nodos» del Dashboard enseña las operaciones fallidas:** el número de «Fallidos» es ahora un botón que abre una ventana con cada operación (nodo, acción, dominio, intentos, fecha y error, sin el contenido) y una explicación del HTTP 422 y de los errores de conexión, para decidir antes de pulsar «Sincronizar Todo». `ClusterService::getSyncDriftSummary` devuelve ahora también `items` (hasta 100). La ventana trae **«Reintentar estas operaciones»** (vuelve a encolar solo las fallidas, con `retry-queue`) y deja la sincronización completa como enlace aparte, porque esa es mucho más pesada (provisiona hostings, copia archivos y certificados). La página Cluster muestra el mismo aviso amarillo arriba cuando hay operaciones fallidas, con «Ver la cola» y «Reintentar las fallidas».
+
 ## [1.0.407] — 2026-10-21 — Las réplicas calculan la clave pública DKIM
 
 ### Corregido

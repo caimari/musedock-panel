@@ -91,6 +91,24 @@ class ClusterService
             ];
         }
         $out['has_drift'] = $out['total_dead'] > 0;
+        // Detalle de las operaciones muertas (sin el contenido, que puede llevar hashes), para el modal del Dashboard
+        $out['items'] = [];
+        if ($out['has_drift']) {
+            try {
+                foreach (Database::fetchAll(
+                    "SELECT q.id, q.node_id, q.action, q.payload->>'hosting_action' AS hosting_action,
+                            coalesce(q.payload->'hosting_data'->>'domain', q.payload->'hosting_data'->>'main_domain') AS domain,
+                            q.attempts, q.max_attempts, q.error_message, q.created_at
+                     FROM cluster_queue q
+                     WHERE q.status = 'failed' AND q.attempts >= q.max_attempts
+                     ORDER BY q.created_at DESC, q.id DESC LIMIT 100"
+                ) as $r) {
+                    $r['node'] = $nodeNames[(int)$r['node_id']] ?? ('#' . $r['node_id']);
+                    $out['items'][] = $r;
+                }
+            } catch (\Throwable) {
+            }
+        }
         return $out;
     }
 

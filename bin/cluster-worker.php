@@ -1580,6 +1580,17 @@ try {
     logMsg("ERROR in cert monitor: " . $e->getMessage());
 }
 
+// Cada 6 h: ¿el PHP de este servidor está en la versión corregida y sin procesos con el binario viejo?
+// (también en réplicas y testigos: un nodo atrasado es el que se olvida)
+try {
+    if (time() - (int)strtotime(\MuseDockPanel\Settings::get('php_patch_last_run', '') ?: '@0') >= 21600) {
+        $res = \MuseDockPanel\Services\PhpPatchService::checkAndAlert();
+        logMsg('PHP: ' . (count($res['behind']) + count($res['stale']) ? count($res['behind']) . ' rama(s) atrasada(s), ' . count($res['stale']) . ' proceso(s) viejo(s)' : 'al día'));
+    }
+} catch (\Throwable $e) {
+    logMsg('ERROR in php patch check: ' . $e->getMessage());
+}
+
 // Cada 6 h: ¿cada web que sirve este Caddy tiene un certificado válido y renovado?
 // (lo anterior solo ve fallos en bucle; esto ve certificados sin renovar o que no son suyos)
 try {

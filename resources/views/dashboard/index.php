@@ -218,7 +218,7 @@
                         ?>
                             <tr>
                                 <td class="ps-2 fw-semibold"><i class="bi bi-hdd-network me-1 text-warning"></i><?= View::e($dn['name']) ?></td>
-                                <td class="text-center"><span class="badge bg-warning text-dark"><?= (int)$dn['dead'] ?></span></td>
+                                <td class="text-center"><button type="button" class="badge bg-warning text-dark border-0" style="cursor:pointer" data-bs-toggle="modal" data-bs-target="#syncDriftModal" title="Ver las operaciones fallidas"><?= (int)$dn['dead'] ?> <i class="bi bi-box-arrow-up-right ms-1"></i></button></td>
                                 <td class="small text-muted"><?= View::e($fechaEs) ?><?php if ($haceDias): ?> <span class="text-secondary">(<?= View::e($haceDias) ?>)</span><?php endif; ?></td>
                                 <td class="small text-muted" style="font-family:monospace;"><?= View::e(substr((string)($dn['sample_error'] ?? ''), 0, 60)) ?></td>
                             </tr>
@@ -226,6 +226,54 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="syncDriftModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Operaciones que no llegaron al otro nodo</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">
+                    Cada fila es un cambio que este servidor intentó enviar al nodo y que falló en todos sus intentos. No se muestra el contenido de la operación.
+                    <strong>HTTP 422</strong> suele ser que el nodo tenía una versión antigua del panel y no entendía la acción; tras actualizarlo, <strong>Reintentar estas operaciones</strong> las vuelve a poner en cola (solo ellas; la sincronización completa es más pesada).
+                    Un error de conexión indica que el nodo estaba caído o sin VPN en ese momento.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-sm table-dark align-middle mb-0">
+                        <thead><tr><th>#</th><th>Nodo</th><th>Operación</th><th>Dominio</th><th class="text-center">Intentos</th><th>Cuándo</th><th>Error</th></tr></thead>
+                        <tbody>
+                        <?php foreach (($syncDrift['items'] ?? []) as $it): ?>
+                            <tr>
+                                <td class="text-muted"><?= (int)$it['id'] ?></td>
+                                <td><?= View::e((string)$it['node']) ?></td>
+                                <td style="font-family:monospace"><?= View::e((string)$it['action']) ?><?= !empty($it['hosting_action']) ? ' <span class="text-muted">/ ' . View::e((string)$it['hosting_action']) . '</span>' : '' ?></td>
+                                <td><?= View::e((string)($it['domain'] ?? '')) ?: '—' ?></td>
+                                <td class="text-center"><?= (int)$it['attempts'] ?>/<?= (int)$it['max_attempts'] ?></td>
+                                <td class="small text-nowrap"><?= View::e(date('d/m/Y H:i', (int)strtotime((string)$it['created_at']))) ?></td>
+                                <td class="small" style="font-family:monospace;word-break:break-word"><?= View::e(substr((string)($it['error_message'] ?? ''), 0, 300)) ?: '—' ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (empty($syncDrift['items'])): ?>
+                            <tr><td colspan="7" class="text-muted text-center">Sin detalle disponible.</td></tr>
+                        <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <?php if (\MuseDockPanel\Settings::get('cluster_fenced', '0') !== '1'): ?>
+                <a href="/settings/cluster" class="btn btn-outline-secondary btn-sm me-auto" title="Pesada: provisiona hostings, copia archivos y certificados">Sincronización completa…</a>
+                <form method="post" action="/settings/cluster/retry-queue" class="d-inline">
+                    <?= View::csrf() ?>
+                    <button type="submit" class="btn btn-warning btn-sm" title="Vuelve a poner en cola solo estas operaciones fallidas"><i class="bi bi-arrow-repeat me-1"></i>Reintentar estas operaciones</button>
+                </form>
+                <?php endif; ?>
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
             </div>
         </div>
     </div>
