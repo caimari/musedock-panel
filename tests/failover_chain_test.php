@@ -59,7 +59,7 @@ $now = 1_800_000_000;
 ok('al día hace 3 min: puede', S::freshnessVerdict($now - 180, $now, 30)['ok'] === true);
 $v = S::freshnessVerdict($now - 90 * 60, $now, 30);
 ok('al día por última vez hace 90 min (acaba de volver o su réplica estaba rota): NO, con el motivo', $v['ok'] === false && str_contains($v['reason'], '90 min'), json_encode($v));
-ok('sin dato (versión recién instalada) se deja pasar como antes', S::freshnessVerdict(null, $now, 30)['ok'] === true && S::freshnessVerdict(0, $now, 30)['ok'] === true);
+ok('sin dato se bloquea la promoción automática', S::freshnessVerdict(null, $now, 30)['ok'] === false && S::freshnessVerdict(0, $now, 30)['ok'] === false);
 ok('con la comprobación desactivada (failover_require_fresh = 0) siempre puede', S::freshnessVerdict($now - 999 * 60, $now, 30, false)['ok'] === true);
 ok('la espera por los vecinos y testigos no atrasa la copia: con el master 40 min caído, un dato de hace 60 min vale (límite 30 + 40)', S::freshnessVerdict($now - 60 * 60, $now, 30, true, 40)['ok'] === true);
 ok('pero un dato de hace 90 min con el master caído 40 min no (límite 70)', S::freshnessVerdict($now - 90 * 60, $now, 30, true, 40)['ok'] === false);

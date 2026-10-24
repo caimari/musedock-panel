@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.409',
+                'date' => '2026-10-24',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'La promoción se bloquea sin testigos, frescura conocida o aislamiento remoto verificado. La falta de respuesta ya no acredita fencing. Esto puede requerir intervención en una caída real.',
+                        'El dato de frescura exige recepción streaming y un gap de replay medido; no se acepta inventario vacío ni marcas de tiempo futuras.',
+                    ],
+                    'added' => [
+                        'Actualizador solo de código con vista previa y commit fijo; rechaza cambios locales, divergencias y retrocesos. No ejecuta migraciones ni reinicia servicios.',
+                        'Guardián de arranque estricto opcional, con dependencias Requires/After y vista previa de instalación. No se instala automáticamente. Requiere validación y ventana de mantenimiento.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.408',
                 'date' => '2026-10-22',
                 'badge' => 'info',

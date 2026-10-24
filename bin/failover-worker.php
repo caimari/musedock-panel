@@ -7,7 +7,7 @@
  * 1. Health check all configured servers via /api/health endpoint
  * 2. Track consecutive failures/recoveries per server
  * 3. Evaluate state and auto-transition if mode is 'auto' or 'semiauto'
- * 4. In 'semiauto' mode: only notify, don't transition
+ * 4. In 'semiauto': failover is automatic; failback only notifies
  * 5. In 'auto' mode: transition automatically + integrate with cluster promote/demote
  *
  * Usage:
@@ -539,24 +539,8 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
         return false;
     }
     if ($answered === 0) {
-        // Ningún testigo responde: quizá la aislada sea ESTA réplica (su línea caída). Sin
-        // salida a Internet tampoco podría mover el DNS: promoverse solo dejaría dos masters
-        // al volver la red. Se comprueba la salida (la API de Cloudflare, que es lo que hace
-        // falta para el relevo) y, si no hay, no se promueve.
-        $out = false;
-        foreach (['api.cloudflare.com', '1.1.1.1'] as $h) {
-            $fp = @fsockopen($h, 443, $e, $s, 5);
-            if ($fp) {
-                fclose($fp);
-                $out = true;
-                break;
-            }
-        }
-        if (!$out) {
-            logMsg('Auto-promote: ABORTADO — ningún testigo responde y este nodo no tiene salida a Internet: el aislado es este nodo, no el principal');
-            return false;
-        }
-        logMsg('Auto-promote: sin testigo que responda — se decide con la vista de este nodo (configura un testigo en otro proveedor)');
+        logMsg('Auto-promote: DEFERRED — aplazado: ningún testigo responde; Internet no demuestra aislamiento del principal');
+        return false;
     }
 
     // ── ¿Mi copia está al día? ── Promover una réplica atrasada (acaba de volver y aún se reconstruye, o su réplica llevaba

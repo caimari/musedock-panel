@@ -35,11 +35,11 @@ class FailoverSafetyService
 
     /**
      * Verify the old master is really unable to serve/write before we promote.
-     * Returns fenced=true only when we are confident it is down or was stopped.
+     * Returns fenced=true only after an explicit remote confirmation or operator override.
      *
      * @param string $oldMasterIp WireGuard IP of the current/old master
-     * @param bool   $force       accept "unreachable" as fenced (network partition
-     *                            risk: it may be alive and serving to the world)
+     * @param bool   $force       explicit override after a failed remote stop; never
+     *                            treats an unreachable node as proof of fencing
      */
     public static function fenceOldMaster(string $oldMasterIp, bool $force = false): array
     {
@@ -50,7 +50,7 @@ class FailoverSafetyService
         }
         // Un servidor no puede «aislar al master antiguo» si esa IP es la suya: sería pedirse a sí mismo que se aparte
         // (o, peor, apartar a otro por una búsqueda imprecisa). Casi siempre es un cluster_master_ip mal guardado.
-        if (!$force && ClusterGuardService::hostIsSelf($oldMasterIp)) {
+        if (ClusterGuardService::hostIsSelf($oldMasterIp)) {
             return ['fenced' => false, 'checks' => $checks,
                 'error' => "La IP del master antiguo ({$oldMasterIp}) es de ESTE servidor: no se aísla a sí mismo y promover así dejaría dos masters (split-brain). Revisa cluster_master_ip."];
         }
@@ -70,11 +70,15 @@ class FailoverSafetyService
         $anyAlive = $panelUp || $webUp || $pgUp;
 
         if (!$anyAlive) {
+            if ($force) {
+                return ['fenced' => true, 'checks' => $checks, 'method' => 'operator-confirmed',
+                    'message' => 'Aislamiento confirmado explícitamente por el operador (--force); no demostrado por sondas.'];
+            }
             return [
-                'fenced'  => true,
+                'fenced'  => false,
                 'checks'  => $checks,
-                'method'  => 'down',
-                'message' => 'El master antiguo no responde en panel, web ni BBDD: se considera aislado.',
+                'method'  => 'unreachable',
+                'error'   => 'No se puede demostrar aislamiento: la falta de respuesta también puede ser una partición de red. Se requiere aislamiento independiente confirmado.',
             ];
         }
 
@@ -126,7 +130,7 @@ class FailoverSafetyService
             // La respuesta NO es fiable: quien se aísla para su Caddy, y por ese Caddy llegó esta petición, así
             // que la respuesta puede perderse («Connection reset») aunque el aislamiento se haga (relevo
             // 2026-10-18: Filemon se apartó y mortadelo, sin respuesta, abortó la promoción y no deshizo nada).
-            // Se mira de verdad: el otro nodo dice que está apartado, o ya no responde por ninguna parte.
+            // Solo una respuesta autenticada de estado apartado confirma el aislamiento.
             $answered = !empty($r['ok']);
             $deadline = time() + 45;
             do {
@@ -144,15 +148,16 @@ class FailoverSafetyService
     }
 
     /**
-     * ¿Está apartado el otro nodo? Sí si lo dice él (cluster_fenced) o si no responde por ninguna parte
-     * (panel, web y base de datos). Pura.
+     * ¿Está apartado el otro nodo? Solo si una respuesta autenticada confirma cluster_fenced y aislamiento verificado. No responder
+     * puede significar partición de red. Pura; no sustituye STONITH ni una lease de escritura.
      */
     public static function fenceConfirmed(?array $remoteState, bool $panelUp, bool $webUp, bool $pgUp): bool
     {
-        if ($remoteState !== null && !empty($remoteState['cluster_fenced'])) {
+        if ($remoteState !== null && ($remoteState['cluster_fenced'] ?? false) === true
+            && ($remoteState['cluster_fence_verified'] ?? false) === true) {
             return true;
         }
-        return !$panelUp && !$webUp && !$pgUp;
+        return false; // La ausencia de respuesta nunca demuestra exclusión de escrituras.
     }
 
     /** ¿Responde el master como sano (panel y web)? Un master apartado responde por el panel de rescate pero no sirve webs. */
@@ -184,36 +189,45 @@ class FailoverSafetyService
      */
     public static function replicaDbHealthyNow(): bool
     {
+        $replicas = 0;
         try {
+            $panelPort = (int)Env::get('DB_PORT', 5433);
+            $maxBytes = max(0, (int)Settings::get('failover_fresh_max_bytes', '16777216'));
             foreach (PgClusterService::listClusters() as $c) {
+                if ((int)$c['port'] === $panelPort) continue;
                 $rec = ReplicationService::queryCluster($c, 'SELECT pg_is_in_recovery()');
-                if (($rec[0][0] ?? '') !== 't') {
-                    continue;
-                }
+                if (($rec[0][0] ?? '') !== 't') return false;
+                $replicas++;
                 $wr = ReplicationService::queryCluster($c, 'SELECT status FROM pg_stat_wal_receiver');
-                if (($wr[0][0] ?? '') !== 'streaming') {
-                    return false;
-                }
+                $gap = ReplicationService::queryCluster($c,
+                    "SELECT pg_wal_lsn_diff((SELECT latest_end_lsn FROM pg_stat_wal_receiver LIMIT 1), pg_last_wal_replay_lsn())::text");
+                if (!self::replicaSampleHealthy((string)($wr[0][0] ?? ''), $gap[0][0] ?? null, $maxBytes)) return false;
             }
             $ss = ReplicationService::getMysqlSlaveStatus();
             if ($ss) {
                 $io = $ss['Slave_IO_Running'] ?? $ss['Replica_IO_Running'] ?? '';
                 $sql = $ss['Slave_SQL_Running'] ?? $ss['Replica_SQL_Running'] ?? '';
-                if ($io !== 'Yes' || $sql !== 'Yes' || (int)($ss['Seconds_Behind_Master'] ?? 0) > 300) {
-                    return false;
-                }
+                $lag = $ss['Seconds_Behind_Master'] ?? $ss['Seconds_Behind_Source'] ?? null;
+                if ($io !== 'Yes' || $sql !== 'Yes' || $lag === null || (int)$lag > 300) return false;
+                $replicas++;
             }
         } catch (\Throwable) {
             return false;
         }
-        return true;
+        return $replicas > 0; // No inventory is not evidence of freshness.
+    }
+
+    /** Pure: a streaming connection alone does not demonstrate replay freshness. */
+    public static function replicaSampleHealthy(string $status, mixed $gap, int $maxBytes): bool
+    {
+        return $status === 'streaming' && is_scalar($gap) && is_numeric($gap)
+            && (float)$gap >= 0 && (float)$gap <= max(0, $maxBytes);
     }
 
     /**
      * ¿Esta réplica puede promoverse SOLA sin perder lo escrito en el master? Se promueve solo si sus bases estaban al día hace
      * poco (replica_fresh_at, anotado mientras el master vivía). Una réplica que acaba de volver y aún se está reconstruyendo, o cuya
-     * réplica lleva rato rota, no tiene lo escrito por el master: promoverla pierde esos cambios. Sin dato (versión recién
-     * instalada) se deja pasar como antes. Pura. @return array{ok:bool,reason:string}
+     * réplica lleva rato rota, no tiene lo escrito por el master: promoverla pierde esos cambios. Sin dato se bloquea la promoción automática. Pura. @return array{ok:bool,reason:string}
      */
     public static function freshnessVerdict(?int $freshAt, int $now, int $maxMinutes, bool $required = true, int $downMinutes = 0): array
     {
@@ -221,10 +235,13 @@ class FailoverSafetyService
             return ['ok' => true, 'reason' => 'comprobación desactivada (failover_require_fresh = 0)'];
         }
         if ($freshAt === null || $freshAt <= 0) {
-            return ['ok' => true, 'reason' => 'sin dato de la copia (aún no se ha anotado): se permite como antes'];
+            return ['ok' => false, 'reason' => 'sin dato de frescura de la copia: promoción automática bloqueada'];
         }
         // El dato deja de renovarse cuando cae el master: se cuenta el margen desde que cayó (la espera por los vecinos y los testigos no la atrasa).
-        $age = (int)floor(($now - $freshAt) / 60);
+        if ($freshAt > $now) {
+            return ['ok' => false, 'reason' => 'dato de frescura en el futuro: revisar sincronización del reloj'];
+        }
+        $age = (int)ceil(($now - $freshAt) / 60);
         $limit = max(1, $maxMinutes) + max(0, $downMinutes);
         if ($age > $limit) {
             return ['ok' => false, 'reason' => "la copia de las bases de datos no estaba al día: la última vez que lo estuvo fue hace {$age} min (límite {$limit})"];

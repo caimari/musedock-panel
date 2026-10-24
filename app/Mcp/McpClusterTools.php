@@ -1553,6 +1553,11 @@ final class McpClusterTools
     {
         $role = self::role();
         $issues = [];
+        if (!is_file('/etc/systemd/system/musedock-ha-boot-guard.service')) {
+            $issues[] = 'Falta musedock-boot-guard: el antiguo principal puede arrancar escribible. Preparar instalación y validar en laboratorio.';
+        } else {
+            $issues[] = 'Guardián presente: comprobar dependencias y fallo cerrado; su existencia no demuestra arranque seguro.';
+        }
         $myIps = self::localIps();
         $masterIp = Settings::get('cluster_master_ip', '');
 
@@ -1698,6 +1703,7 @@ final class McpClusterTools
             'ready' => !$issues,
             'issues' => $issues,
             'role' => $role,
+            'ha_policy' => ['semiauto' => 'Promoción y DNS automáticos por caída; devolución manual.', 'fencing' => 'No responder no acredita aislamiento. Se exige evidencia y no solo un flag.'],
             'local_ips' => $myIps,
             'cluster_master_ip' => $masterIp ?: null,
             'nodes' => $nodes,

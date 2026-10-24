@@ -98,8 +98,8 @@ use MuseDockPanel\Services\FailoverSafetyService as F;
 use MuseDockPanel\Services\ConfigMirrorService as M;
 
 section('6. Aislar a otro nodo y promover (caso 2026-10-18)');
-ok('dice «estoy apartado» → confirmado aunque su panel siga (rescate) y su BBDD en solo lectura', F::fenceConfirmed(['cluster_fenced' => true], true, false, true) === true);
-ok('no responde por ninguna parte → confirmado (cayó)', F::fenceConfirmed(null, false, false, false) === true);
+ok('dice «estoy apartado» → confirmado aunque su panel siga (rescate) y su BBDD en solo lectura', F::fenceConfirmed(['cluster_fenced' => true, 'cluster_fence_verified' => true], true, false, true) === true);
+ok('no responde por ninguna parte → NO confirmado (posible partición)', F::fenceConfirmed(null, false, false, false) === false);
 ok('responde y NO está apartado → no confirmado', F::fenceConfirmed(['cluster_fenced' => false], true, true, true) === false);
 ok('sin respuesta del estado pero la web sigue sirviendo → no confirmado', F::fenceConfirmed(null, true, true, true) === false);
 ok('sin estado, panel caído pero su BBDD sigue → no confirmado', F::fenceConfirmed(null, false, false, true) === false);

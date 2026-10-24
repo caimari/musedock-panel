@@ -2,6 +2,21 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.409] — 2026-10-24 — Protecciones conservadoras de failover
+
+### Corregido
+- Sin testigos o frescura conocida no se promueve automáticamente. La falta de respuesta nunca prueba aislamiento; `--force` sigue siendo una decisión explícita del operador tras verificar el aislamiento por otra vía.
+- El flag remoto `cluster_fenced` ya no basta: se exige evidencia actual de unidades de datos detenidas y protegidas ante reinicio. Nodos antiguos no aportan esta evidencia y bloquean la promoción sin force.
+- La frescura PostgreSQL comprueba gap de replay respecto al último LSN comunicado por el emisor (máximo por defecto 16 MiB, ajuste `failover_fresh_max_bytes`). No equivale a comparar el LSN actual del principal ni garantiza RPO cero. Datos futuros o ausencia de réplicas no se consideran sanos.
+
+### Añadido
+- `update-code-only.sh`: preview por defecto, commit completo y fast-forward, sin hooks Git, migraciones ni reinicios. Rechaza cambios locales/untracked, historial divergente y downgrade. El código puede afectar a la siguiente ejecución del worker.
+- `ha-boot-check.php` e `install-ha-boot-guard.php`: guardián estricto **opcional**, no instalado por la actualización. Los consumidores requieren su éxito; error, timeout, rol desconocido o par no verificable bloquean arranque. Requiere BD del panel separada. Revisar y ensayar antes de `--apply`.
+- Inventario de solo lectura y prompts por nodo en `docs/HA-SERVER-PROMPTS.md`.
+
+### Límites
+- No se han ejecutado conmutaciones ni instalado unidades en producción. No se implementa STONITH del proveedor, quorum/lease distribuida ni correcciones de jobs de MuseRelay. Persistencia Redis, backups y pruebas completas siguen pendientes. El actualizador general conserva sus tareas de infraestructura: para esta entrega utilizar exclusivamente el procedimiento solo de código.
+
 ## [1.0.408] — 2026-10-22 — Aviso de PHP sin parchear
 
 ### Añadido

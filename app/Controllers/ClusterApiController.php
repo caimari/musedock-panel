@@ -1201,6 +1201,7 @@ class ClusterApiController
 
     private function handleQueryLocalState(): array
     {
+        $fenceEvidence = \MuseDockPanel\Services\HaReadinessService::fenceEvidence();
         return [
             'ok'   => true,
             'state' => [
@@ -1216,6 +1217,8 @@ class ClusterApiController
                 // que él (FailoverSafetyService::checkStaleMaster).
                 'cluster_promoted_at'         => Settings::get('cluster_promoted_at', ''),
                 'cluster_fenced'              => Settings::get('cluster_fenced', '0') === '1',
+                'cluster_fence_verified'      => $fenceEvidence['verified'],
+                'cluster_fence_evidence'      => $fenceEvidence,
             ],
         ];
     }
