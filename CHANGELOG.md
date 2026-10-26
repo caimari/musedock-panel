@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.411] — 2026-10-26 — «Suspender y quitar de Caddy» también en las réplicas
+
+### Corregido
+- **La casilla «quitar de Caddy» de Suspender no llegaba a las réplicas:** el master quitaba la ruta del dominio, pero la orden `suspend_hosting` que se manda a los nodos no llevaba la casilla y cada réplica dejaba una **página de mantenimiento** en su lugar. Si ese dominio pasaba a servirlo otra aplicación (p. ej. el CMS al migrar un WordPress), un relevo a la réplica habría enseñado mantenimiento en vez del sitio nuevo. Ahora la orden lleva `remove_caddy` y la réplica lo interpreta igual (`ClusterService::wantsCaddyRemoval`). Un master o una réplica antiguos siguen funcionando como antes (mantenimiento). El mensaje al suspender dice ahora lo que ha pasado de verdad: no se borra nada (ficheros, bases de datos y usuario siguen en su sitio) y «Activate» lo deshace. Prueba: `tests/suspend_remove_caddy_test.php` (9).
+
 ## [1.0.409] — 2026-10-24 — Protecciones conservadoras de failover
 
 ### Corregido

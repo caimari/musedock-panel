@@ -112,6 +112,15 @@ class ClusterService
         return $out;
     }
 
+    /**
+     * ¿La orden «suspend_hosting» pide quitar el dominio de Caddy (en vez de poner la página de mantenimiento)?
+     * Pura: acepta lo que llega por JSON o por formulario (true, 1, '1', 'true', 'on'…); cualquier otra cosa es no.
+     */
+    public static function wantsCaddyRemoval(array $hostingData): bool
+    {
+        return filter_var($hostingData['remove_caddy'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    }
+
     /** Get only nodes with web service — use for hosting sync (excludes mail-only nodes) */
     public static function getWebNodes(): array
     {
@@ -1944,9 +1953,12 @@ class ClusterService
                     if (!$acc) return ['ok' => false, 'message' => "Hosting {$username} not found on slave"];
                     $php = $acc['php_version'] ?? ($hostingData['php_version'] ?? '8.3');
                     $sock = $acc['fpm_socket'] ?? "unix//run/php/php{$php}-fpm-{$username}.sock";
+                    // «Quitar de Caddy» elegido en el master: la réplica también quita la ruta (si no, quedaría una
+                    // página de mantenimiento que taparía a quien sirva ese dominio después, p. ej. el CMS)
+                    $removeCaddy = self::wantsCaddyRemoval($hostingData);
                     try {
-                        SystemService::suspendAccount($username, $sock, $acc['domain'] ?? ($hostingData['domain'] ?? ''), $php);
-                        return ['ok' => true, 'message' => "Hosting {$username} suspended"];
+                        SystemService::suspendAccount($username, $sock, $acc['domain'] ?? ($hostingData['domain'] ?? ''), $php, $removeCaddy);
+                        return ['ok' => true, 'message' => "Hosting {$username} suspended" . ($removeCaddy ? ' (ruta de Caddy quitada)' : '')];
                     } catch (\Throwable $e) {
                         return ['ok' => false, 'message' => 'suspend failed: ' . $e->getMessage()];
                     }

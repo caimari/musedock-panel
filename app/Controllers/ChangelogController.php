@@ -20,6 +20,16 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.411',
+                'date' => '2026-10-26',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La casilla «quitar de Caddy» de Suspender no llegaba a las réplicas (dejaban una página de mantenimiento en lugar de quitar la ruta, y un relevo habría tapado el sitio que sirva ese dominio después, p. ej. el CMS). Ahora la orden a los nodos lleva remove_caddy y la réplica lo hace igual; el mensaje dice que no se borra nada y que Activate lo deshace.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.409',
                 'date' => '2026-10-24',
                 'badge' => 'warning',

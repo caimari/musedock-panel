@@ -1939,12 +1939,15 @@ class AccountController
                     'hosting_data' => [
                         'username' => $account['username'],
                         'domain' => $account['domain'],
+                        'remove_caddy' => $removeCaddy,
                     ],
                 ]);
             }
         }
 
-        Flash::set('warning', "Cuenta {$account['domain']} suspendida. Se muestra pagina de mantenimiento.");
+        Flash::set('warning', $removeCaddy
+            ? "Cuenta {$account['domain']} suspendida y quitada de Caddy (aquí y en los nodos). No se ha borrado nada: ficheros, bases de datos y usuario siguen en su sitio; «Activate» la vuelve a poner."
+            : "Cuenta {$account['domain']} suspendida. Se muestra pagina de mantenimiento.");
         Router::redirect('/accounts/' . $params['id']);
     }
 
