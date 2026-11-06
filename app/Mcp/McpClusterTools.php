@@ -524,6 +524,7 @@ final class McpClusterTools
             'mcp_permissions' => [
                 'write' => Settings::get('mcp_allow_write', '0') === '1',
                 'dns_edit' => Settings::get('mcp_allow_dns', '0') === '1',
+                'hosting_create' => Settings::get('mcp_allow_hosting_create', '0') === '1',
                 'never' => 'Ninguna herramienta borra datos ni registros DNS.',
             ],
             'start_here' => 'Para un dominio nuevo: dns_records (ver su zona) → dns_record_set (CNAME raíz y www a dns_default_target, proxy según el usuario) → comprobar la web. Para el estado general: monitor_status, notify_status, failover_preflight, domains_status.',

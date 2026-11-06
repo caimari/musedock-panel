@@ -34,6 +34,22 @@ class McpHostingTools
                     'apply' => $apply,
                 ], ['hosting', 'name']),
             ],
+            'hosting_create' => [
+                'write' => true,
+                'title' => 'Crear un hosting independiente (usuario, carpeta, PHP, Caddy y DNS)',
+                'description' => 'Crea una cuenta de hosting igual que /accounts/create: usuario del sistema, /var/www/vhosts/<dominio>/httpdocs, pool de PHP-FPM, ruta de Caddy con certificado y copia a los nodos web; opcionalmente vincula el hosting a un cliente y crea el DNS en Cloudflare (CNAME al dns_default_target; en un dominio raíz también www). No es un subdominio del CMS. La contraseña del usuario se GENERA en el servidor y NO se devuelve: se ve una vez en Ajustes → MCP → Credenciales pendientes. NO crea correo ni borra nada. Primero sin apply (plan). Para aplicar exige DOS permisos en Ajustes → MCP: "Permitir acciones que modifican" y "Permitir crear hostings" (este último lo activa un administrador con su contraseña). Si pides DNS, también "Permitir editar DNS en Cloudflare". Solo por el MCP HTTP del master, nunca por stdio ni en un slave.',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Dominio o subdominio del hosting (p. ej. finder.ejemplo.com)'],
+                    'username' => ['type' => 'string', 'description' => 'Opcional: usuario del sistema (minúsculas, números y _; 3-31). Por defecto, el dominio sin puntos'],
+                    'php_version' => ['type' => 'string', 'description' => 'Opcional: 8.3 por defecto'],
+                    'disk_quota_mb' => ['type' => 'integer', 'description' => 'Opcional: cuota de disco en MB (1024 por defecto)'],
+                    'customer' => ['type' => 'string', 'description' => 'Opcional: id o correo de un cliente activo al que vincular el hosting'],
+                    'description' => ['type' => 'string', 'description' => 'Opcional: nota interna'],
+                    'dns' => ['type' => 'boolean', 'description' => 'true (por defecto) = crear también el DNS en Cloudflare; false = solo el hosting'],
+                    'proxied' => ['type' => 'boolean', 'description' => 'Proxy naranja de Cloudflare para el DNS. PREGUNTA al usuario: con dns=true es obligatorio indicarlo al aplicar'],
+                    'apply' => $apply,
+                ], ['domain']),
+            ],
             'domain_redirects' => [
                 'title' => 'Ver las redirecciones de dominio',
                 'description' => 'Solo lectura. Lista las redirecciones del panel: las sueltas (un dominio que solo redirige a una URL, como en /domains) y las de los hostings (un dominio que redirige al dominio del hosting).',
@@ -175,7 +191,8 @@ class McpHostingTools
     {
         return match ($name) {
             'database_create'       => self::databaseCreate($args),
-            'domain_redirects'      => self::redirectsList($args),
+            'hosting_create'        => self::hostingCreate($args),
+            'domain_redirects'     => self::redirectsList($args),
             'domain_redirect_create' => self::redirectCreate($args),
             'password_change_request' => self::passwordRequest($args),
             'mail_quota_request'      => self::quotaRequest($args),
@@ -207,6 +224,193 @@ class McpHostingTools
             throw new \InvalidArgumentException("No hay ningún hosting con dominio o usuario '{$h}' (mira hosting_accounts).");
         }
         return $row;
+    }
+
+    private static function hostingCreate(array $args): array
+    {
+        self::guardMaster();
+        $apply = !empty($args['apply']);
+        $domain = strtolower(trim((string)($args['domain'] ?? ''), " \t."));
+        if (strlen($domain) > 253 || !preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $domain)) {
+            throw new \InvalidArgumentException('Dominio no válido (letras, números, guiones y puntos).');
+        }
+        // Crear el usuario y las carpetas exige root. Por HTTP el panel corre como root; por stdio
+        // con otro usuario quedaría a medias (base de datos sí, ficheros no).
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            throw new \RuntimeException('Crear un hosting solo funciona por el MCP HTTP del panel (que corre como root), no por stdio con un usuario normal: quedaría a medias.');
+        }
+
+        // Usuario del sistema: el dominio sin puntos, como los hostings existentes.
+        $username = strtolower(trim((string)($args['username'] ?? '')));
+        if ($username === '') {
+            $username = preg_replace('/[^a-z0-9]/', '', $domain);
+            if (!preg_match('/^[a-z]/', $username)) {
+                $username = 'h' . $username;
+            }
+            if (strlen($username) > 31) {
+                throw new \InvalidArgumentException("El usuario derivado del dominio ('{$username}') pasa de 31 caracteres: indica `username`.");
+            }
+        }
+        if (!preg_match('/^[a-z][a-z0-9_]{2,30}$/', $username)) {
+            throw new \InvalidArgumentException('Usuario no válido: empieza por letra minúscula, solo a-z, 0-9 y _ (3-31 caracteres).');
+        }
+        $phpVersion = trim((string)($args['php_version'] ?? '8.3')) ?: '8.3';
+        if (!preg_match('/^\d\.\d$/', $phpVersion) || !is_dir("/etc/php/{$phpVersion}/fpm")) {
+            throw new \InvalidArgumentException("PHP {$phpVersion} no está instalado en este servidor.");
+        }
+        $quota = (int)($args['disk_quota_mb'] ?? 1024);
+        if ($quota < 100 || $quota > 1048576) {
+            throw new \InvalidArgumentException('La cuota de disco debe estar entre 100 MB y 1 TB.');
+        }
+        $description = mb_substr(trim((string)($args['description'] ?? '')), 0, 200);
+
+        $customerId = null;
+        $customerLabel = null;
+        $cust = trim((string)($args['customer'] ?? ''));
+        if ($cust !== '') {
+            $c = Database::fetchOne("SELECT id, name, email FROM customers WHERE status = 'active' AND (CAST(id AS TEXT) = :c OR lower(email) = lower(:c))", ['c' => $cust]);
+            if (!$c) {
+                throw new \InvalidArgumentException("No hay ningún cliente activo con id o correo '{$cust}'.");
+            }
+            $customerId = (int)$c['id'];
+            $customerLabel = "{$c['name']} <{$c['email']}>";
+        }
+
+        // Que no exista ya, ni como hosting, alias, subdominio, usuario del sistema ni ruta de Caddy.
+        if (Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d OR username = :u", ['d' => $domain, 'u' => $username])
+            || Database::fetchOne("SELECT id FROM hosting_domains WHERE domain = :d", ['d' => $domain])
+            || Database::fetchOne("SELECT id FROM hosting_domain_aliases WHERE domain = :d", ['d' => $domain])
+            || Database::fetchOne("SELECT id FROM hosting_subdomains WHERE subdomain = :d", ['d' => $domain])) {
+            throw new \InvalidArgumentException("El dominio '{$domain}' o el usuario '{$username}' ya existen en el panel (hosting, alias, subdominio o redirección).");
+        }
+        if (function_exists('posix_getpwnam') && posix_getpwnam($username)) {
+            throw new \InvalidArgumentException("El usuario del sistema '{$username}' ya existe: indica otro `username`.");
+        }
+        $hosts = \MuseDockPanel\Services\SystemService::hostsWithWww($domain);
+        $caddy = \MuseDockPanel\Services\CaddyDomainsService::classify();
+        foreach (($caddy['domains'] ?? []) as $cd) {
+            if (in_array((string)$cd['host'], $hosts, true)) {
+                throw new \InvalidArgumentException("Caddy ya sirve {$cd['host']} ({$cd['group']}: {$cd['detail']}). No se crea para no pisarlo.");
+            }
+        }
+
+        // DNS (opcional): CNAME al nombre por defecto de este servidor; en un dominio raíz, también www.
+        $wantDns = !array_key_exists('dns', $args) || !empty($args['dns']);
+        $dnsAllowed = Settings::get('mcp_allow_dns', '0') === '1';
+        $dnsNames = [];
+        $target = '';
+        if ($wantDns) {
+            $target = McpClusterTools::dnsDefaultTarget();
+            if ($target === '') {
+                throw new \RuntimeException('Este servidor no tiene dns_default_target: fíjalo antes (server_profile_set) o crea el hosting con dns=false.');
+            }
+            $zone = \MuseDockPanel\Services\CloudflareService::findZoneForDomain($domain);
+            if (!$zone) {
+                throw new \RuntimeException("La zona de {$domain} no está en ninguna cuenta de Cloudflare de este panel: crea el hosting con dns=false o añade la cuenta.");
+            }
+            $dnsNames = [$domain];
+            if (strtolower((string)($zone['zone'] ?? '')) === $domain) {
+                $dnsNames[] = 'www.' . $domain;
+            }
+        }
+
+        $plan = [
+            'domain' => $domain,
+            'usuario_sistema' => $username,
+            'carpeta' => "/var/www/vhosts/{$domain}/httpdocs",
+            'php' => $phpVersion,
+            'cuota_disco_mb' => $quota,
+            'cliente' => $customerLabel ?? 'sin vincular',
+            'caddy' => 'ruta propia con certificado automático',
+            'cluster' => 'se copia a los nodos web',
+            'correo' => 'no se crea (hazlo aparte con mail_domain_create)',
+            'password_mode' => 'se generará y se verá una vez en Ajustes → MCP → Credenciales pendientes',
+            'dns' => $wantDns ? array_map(fn($n) => "CNAME {$n} → {$target}", $dnsNames) : 'no se toca',
+            'permisos' => [
+                'crear_hostings' => Settings::get('mcp_allow_hosting_create', '0') === '1' ? 'activo' : 'DESACTIVADO: un administrador debe activarlo en Ajustes → MCP → "Permitir crear hostings"',
+                'editar_dns' => !$wantDns ? 'no hace falta' : ($dnsAllowed ? 'activo' : 'DESACTIVADO: activa "Permitir editar DNS en Cloudflare" o usa dns=false'),
+            ],
+        ];
+        if ($wantDns && !array_key_exists('proxied', $args)) {
+            $plan['pregunta'] = 'Falta decidir el proxy naranja de Cloudflare para el DNS: pregunta al usuario y pasa proxied=true/false.';
+        }
+        if (!$apply) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        if (Settings::get('mcp_allow_hosting_create', '0') !== '1') {
+            throw new \RuntimeException('Crear hostings por MCP está desactivado: un administrador debe activar Ajustes → MCP → "Permitir crear hostings" (pide su contraseña).');
+        }
+        if ($wantDns && !$dnsAllowed) {
+            throw new \RuntimeException('Pediste DNS pero editar DNS por MCP está desactivado (Ajustes → MCP → "Permitir editar DNS en Cloudflare"). Actívalo o repite con dns=false. No se ha creado nada.');
+        }
+        if ($wantDns && !array_key_exists('proxied', $args)) {
+            throw new \InvalidArgumentException('Indica proxied=true o false (pregunta al usuario por el proxy naranja de Cloudflare). No se ha creado nada.');
+        }
+
+        // ── Alta, igual que AccountController::store ──
+        $password = McpCredentials::generate(24);
+        $homeDir = "/var/www/vhosts/{$domain}";
+        $docRoot = "{$homeDir}/httpdocs";
+        $shell = '/usr/sbin/nologin';
+        $res = \MuseDockPanel\Services\SystemService::createAccount($username, $domain, $homeDir, $docRoot, $phpVersion, $password, $shell);
+        if (empty($res['success'])) {
+            throw new \RuntimeException('Error del sistema al crear el hosting: ' . ($res['error'] ?? 'desconocido'));
+        }
+        $id = Database::insert('hosting_accounts', [
+            'customer_id' => $customerId,
+            'domain' => $domain,
+            'username' => $username,
+            'system_uid' => $res['uid'] ?? null,
+            'home_dir' => $homeDir,
+            'document_root' => $docRoot,
+            'php_version' => $phpVersion,
+            'fpm_socket' => "unix//run/php/php{$phpVersion}-fpm-{$username}.sock",
+            'disk_quota_mb' => $quota,
+            'caddy_route_id' => $res['caddy_route_id'] ?? null,
+            'description' => $description,
+            'shell' => $shell,
+        ]);
+        Database::insert('hosting_domains', ['account_id' => $id, 'domain' => $domain, 'is_primary' => true]);
+        LogService::log('account.create', $domain, "Hosting creado por MCP: {$username}@{$domain}");
+
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            foreach (\MuseDockPanel\Services\ClusterService::getWebNodes() as $node) {
+                \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                    'hosting_action' => 'create_hosting',
+                    'hosting_data' => [
+                        'username' => $username, 'domain' => $domain, 'home_dir' => $homeDir, 'document_root' => $docRoot,
+                        'php_version' => $phpVersion, 'password' => $password,
+                        'password_hash' => \MuseDockPanel\Services\SystemService::getPasswordHash($username),
+                        'shell' => $shell, 'system_uid' => $res['uid'] ?? null, 'caddy_route_id' => $res['caddy_route_id'] ?? null,
+                        'customer_id' => $customerId, 'disk_quota_mb' => $quota, 'description' => $description,
+                    ],
+                ]);
+            }
+        }
+        McpCredentials::store('other', "Hosting {$domain} (usuario {$username})", $password, [
+            'dominio' => $domain, 'usuario' => $username, 'carpeta' => $docRoot,
+        ]);
+
+        $out = ['status' => 'creado', 'id' => $id, 'note' => McpCredentials::notice($username)] + $plan;
+        unset($out['permisos'], $out['pregunta']);
+
+        // DNS después: si falla, el hosting ya existe y se dice claro.
+        if ($wantDns) {
+            $done = [];
+            foreach ($dnsNames as $n) {
+                try {
+                    $r = McpClusterTools::run('dns_record_set', [
+                        'name' => $n, 'type' => 'CNAME', 'content' => $target, 'proxied' => !empty($args['proxied']), 'apply' => true,
+                    ]);
+                    $done[] = "{$n}: " . ($r['status'] ?? 'ok');
+                } catch (\Throwable $e) {
+                    $done[] = "{$n}: ERROR — " . $e->getMessage();
+                    $out['dns_aviso'] = 'El hosting está creado pero el DNS no se completó: revísalo con dns_records o ponlo a mano.';
+                }
+            }
+            $out['dns'] = $done;
+        }
+        return $out;
     }
 
     private static function databaseCreate(array $args): array

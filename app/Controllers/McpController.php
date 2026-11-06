@@ -123,6 +123,7 @@ class McpController
             'enabled' => Settings::get('mcp_enabled', '0') === '1',
             'allowWrite' => Settings::get('mcp_allow_write', '0') === '1',
             'allowDns' => Settings::get('mcp_allow_dns', '0') === '1',
+            'allowHostingCreate' => Settings::get('mcp_allow_hosting_create', '0') === '1',
             'allowForwarded' => Settings::get('mcp_allow_forwarded', '1') === '1',
             'clusterNodes' => array_map(static fn($n) => ['name' => (string)$n['name'], 'role' => (string)($n['role'] ?? ''), 'host' => (string)parse_url((string)$n['api_url'], PHP_URL_HOST)],
                 \MuseDockPanel\Services\ClusterService::getNodes()),
@@ -156,6 +157,12 @@ class McpController
         Settings::set('mcp_enabled', $enable ? '1' : '0');
         Settings::set('mcp_allow_write', $write ? '1' : '0');
         Settings::set('mcp_allow_dns', $dns ? '1' : '0');
+        // Crear hostings depende de las acciones que modifican: si se apagan, se apaga también.
+        // (Activarlo solo se puede en hostingCreate(), con la contraseña del administrador.)
+        if (!$write && Settings::get('mcp_allow_hosting_create', '0') === '1') {
+            Settings::set('mcp_allow_hosting_create', '0');
+            LogService::log('mcp.hosting_create', 'disabled', 'Crear hostings por MCP desactivado al apagar las acciones que modifican');
+        }
         $fwd = !empty($_POST['mcp_allow_forwarded']);
         Settings::set('mcp_allow_forwarded', $fwd ? '1' : '0');
         LogService::log('mcp.settings', $enable ? 'enabled' : 'disabled',
@@ -163,6 +170,42 @@ class McpController
             . '; editar DNS: ' . ($dns ? 'PERMITIDO' : 'no') . '; consultas reenviadas desde otros nodos: ' . ($fwd ? 'sí' : 'NO'));
         Flash::set('success', 'Servidor MCP ' . ($enable ? 'activado' : 'desactivado')
             . ($enable ? ($write ? ' con acciones que modifican permitidas.' : ' en solo lectura.') : '.'));
+        header('Location: /settings/mcp');
+        exit;
+    }
+
+    /**
+     * POST /settings/mcp/hosting-create — permitir o no que el MCP cree hostings.
+     * Activarlo exige la contraseña del administrador conectado (la IA nunca puede
+     * darse este permiso sola); desactivarlo no pide nada. Requiere el MCP activo
+     * con "acciones que modifican".
+     */
+    public function hostingCreate(): void
+    {
+        View::verifyCsrf();
+        if (empty($_POST['mcp_allow_hosting_create'])) {
+            Settings::set('mcp_allow_hosting_create', '0');
+            LogService::log('mcp.hosting_create', 'disabled', 'Crear hostings por MCP: desactivado');
+            Flash::set('success', 'El MCP ya no puede crear hostings.');
+            header('Location: /settings/mcp');
+            exit;
+        }
+        if (Settings::get('mcp_enabled', '0') !== '1' || Settings::get('mcp_allow_write', '0') !== '1') {
+            Flash::set('error', 'Activa antes el MCP y "Permitir acciones que modifican".');
+            header('Location: /settings/mcp');
+            exit;
+        }
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        $admin = $adminId > 0 ? \MuseDockPanel\Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]) : null;
+        if (!$admin || !password_verify((string)($_POST['admin_password'] ?? ''), (string)$admin['password_hash'])) {
+            LogService::log('mcp.hosting_create.denied', 'enable', 'Activar crear hostings por MCP con contraseña de administrador incorrecta');
+            Flash::set('error', 'Contraseña de administrador incorrecta: el permiso no se ha activado.');
+            header('Location: /settings/mcp');
+            exit;
+        }
+        Settings::set('mcp_allow_hosting_create', '1');
+        LogService::log('mcp.hosting_create', 'enabled', 'Crear hostings por MCP: ACTIVADO por el administrador');
+        Flash::set('success', 'El MCP ya puede crear hostings (cada alta sigue pidiendo plan y apply). Desactívalo cuando no lo necesites.');
         header('Location: /settings/mcp');
         exit;
     }

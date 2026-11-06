@@ -3529,9 +3529,13 @@ CONF;
         // Lock the user
         shell_exec(sprintf('usermod -L %s 2>&1', escapeshellarg($username)));
 
+        // La configuración se carga siempre: más abajo hace falta la URL de la API de Caddy
+        // aunque la cuenta traiga su versión de PHP (sin esto la ruta nunca se quitaba ni
+        // se ponía la página de mantenimiento al suspender)
+        $config = require PANEL_ROOT . '/config/panel.php';
+
         // Rename FPM pool to disable it — use the account's PHP version, not the global default
         if (empty($phpVersion)) {
-            $config = require PANEL_ROOT . '/config/panel.php';
             $phpVersion = $config['fpm']['php_version'];
         }
         $poolFile = "/etc/php/{$phpVersion}/fpm/pool.d/{$username}.conf";

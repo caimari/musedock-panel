@@ -176,6 +176,25 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
 </div>
 
 <?php if ($enabled && $allowWrite): ?>
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-hdd-network me-2"></i>Crear hostings por MCP</div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">Permite que la IA cree un hosting independiente con <code>hosting_create</code>: usuario del sistema, carpeta, PHP, Caddy con certificado, copia a los nodos web, vínculo a un cliente y, si además tienes activado el DNS, los registros en Cloudflare. Cada alta devuelve antes un plan y solo se ejecuta con <code>apply</code>. La contraseña no sale en el chat: la ves una vez en «Credenciales pendientes». <strong>No borra nada</strong> y no crea correo.</p>
+        <form method="post" action="/settings/mcp/hosting-create" class="d-flex align-items-center gap-3 flex-wrap">
+            <?= View::csrf() ?>
+            <div class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="mcp_allow_hosting_create" name="mcp_allow_hosting_create" value="1" <?= !empty($allowHostingCreate) ? 'checked' : '' ?>>
+                <label class="form-check-label" for="mcp_allow_hosting_create">Permitir crear hostings</label>
+            </div>
+            <input type="password" name="admin_password" class="form-control form-control-sm" style="max-width:260px" autocomplete="current-password" placeholder="Tu contraseña de administrador (para activar)">
+            <button class="btn btn-primary btn-sm"><i class="bi bi-check2 me-1"></i>Guardar</button>
+            <span class="small <?= !empty($allowHostingCreate) ? 'text-warning' : 'text-muted' ?>"><?= !empty($allowHostingCreate) ? 'Activado' : 'Desactivado' ?> · activarlo exige tu contraseña; desactivarlo, no.</span>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($enabled && $allowWrite): ?>
 <div class="alert alert-warning small">
     <i class="bi bi-exclamation-triangle me-1"></i>
     <strong>Acciones que modifican permitidas.</strong> La IA puede crear dominios de correo, publicar registros en Cloudflare y crear buzones y alias.
