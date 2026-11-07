@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.413',
+                'date' => '2026-11-07',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Avisos de lsyncd que rebotaban («degradado» / «recuperado» cada pocos minutos): un reinicio de lsyncd provoca un reescaneo con una cola enorme que sube y baja del umbral y cada oscilación mandaba su correo. Ahora solo avisa si el problema aguanta 10 minutos seguidos y el «recuperado» solo sale tras 10 minutos estable (ajuste alerts_lsyncd_grace_seconds, 600 por defecto; 0 = como antes).',
+                        'Al crear un hosting ya no se reinicia lsyncd: vigila /var/www/vhosts/ entero y toma la carpeta nueva por inotify (la copia a los nodos tarda unos 15 s, el delay de lsyncd). El reinicio reescaneaba todo el árbol y disparaba los falsos avisos. Aplica al alta por el panel y por el MCP; el borrado de hosting sigue reiniciándolo.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.411',
                 'date' => '2026-10-26',
                 'badge' => 'info',
