@@ -1011,7 +1011,22 @@ try {
         $hasConnRefused = !empty($ls['connection_refused_recent']);
         $hasIssue = $isCritical || $hasConnRefused;
 
+        // Margen anti-rebote: un reinicio de lsyncd (p. ej. al dar de alta un hosting) hace un
+        // reescaneo con cola enorme que sube y baja del umbral. Solo se avisa si el problema
+        // aguanta $lsyncdGrace s, y el «recuperado» solo sale tras $lsyncdGrace s estables.
+        $lsyncdGrace = max(0, (int)Settings::get('alerts_lsyncd_grace_seconds', '600'));
+        $inGrace = false;
         if ($hasIssue) {
+            unset($state['ok_since']);
+            if (empty($state['active'])) {
+                if (empty($state['bad_since'])) $state['bad_since'] = $now;
+                $inGrace = ($now - (int)$state['bad_since']) < $lsyncdGrace;
+            }
+        }
+
+        if ($hasIssue && $inGrace) {
+            logMsg("  lsyncd issue in grace period (" . ($now - (int)$state['bad_since']) . "s of {$lsyncdGrace}s), no alert yet.");
+        } elseif ($hasIssue) {
             $badNodes = [];
             foreach (($ls['ssh_unreachable'] ?? []) as $n) {
                 $badNodes[] = (string)($n['node_name'] ?? ($n['host'] ?? 'nodo'));
@@ -1107,8 +1122,13 @@ try {
                     );
                 }
             }
-        } else {
-            if (!empty($state['active'])) {
+        } elseif (!empty($state['active']) || !empty($state['bad_since'])) {
+            // Ya estaba degradado (o en margen): solo se da por bueno tras $lsyncdGrace s seguidos bien.
+            if (empty($state['ok_since'])) $state['ok_since'] = $now;
+            if (($now - (int)$state['ok_since']) < $lsyncdGrace) {
+                logMsg("  lsyncd OK but stabilizing (" . ($now - (int)$state['ok_since']) . "s of {$lsyncdGrace}s).");
+            } else {
+              if (!empty($state['active'])) {
                 \MuseDockPanel\Services\NotificationService::send(
                     '[MuseDock Cluster] lsyncd recuperado',
                     "El estado de lsyncd volvió a normal.\nFecha: " . date('Y-m-d H:i:s'),
@@ -1123,10 +1143,11 @@ try {
                     "Estado de lsyncd normalizado.\nFecha: " . date('Y-m-d H:i:s'),
                     3600
                 );
-            } else {
+              } else {
                 logMsg("  lsyncd health OK.");
+              }
+              $state = [];
             }
-            $state = [];
         }
 
         Settings::set('cluster_lsyncd_alert_state', json_encode($state));

@@ -578,8 +578,9 @@ class AccountController
         shell_exec(sprintf('chown -R %s:www-data %s 2>&1', escapeshellarg($username), escapeshellarg($homeDir)));
         $this->provisionSendSSE('log', 'Permisos ajustados', $st);
 
-        SystemService::restartLsyncd();
-        $this->provisionSendSSE('log', 'lsyncd reiniciado', $st);
+        // Sin reiniciar lsyncd: ya vigila /var/www/vhosts/ y toma la carpeta nueva solo (un reinicio
+        // reescanea todo el árbol y dispara falsos avisos de lsyncd).
+        $this->provisionSendSSE('log', 'lsyncd: la carpeta nueva se copia sola', $st);
 
         // ── Step 7: Save to database ──
         $this->provisionSendSSE('step', 'Guardando en base de datos', $st);

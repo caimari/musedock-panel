@@ -193,8 +193,9 @@ class SystemService
         // 6. Final chown to ensure all files belong to the user
         shell_exec(sprintf('chown -R %s:www-data %s 2>&1', escapeshellarg($username), escapeshellarg($homeDir)));
 
-        // 7. Restart lsyncd so it picks up the new vhost directory
-        self::restartLsyncd();
+        // 7. lsyncd NO se reinicia: vigila /var/www/vhosts/ entero y toma la carpeta nueva por
+        //    inotify (copia el directorio completo al crearse). Reiniciarlo provoca un reescaneo
+        //    de todo el árbol (cola de decenas de miles de eventos) y falsos avisos de lsyncd.
 
         return [
             'success' => true,
