@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.414',
+                'date' => '2026-11-07',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Ajustes → Avisos: botón «Desconectar todos los avisos (Telegram y correo)» arriba del todo. Corta de golpe, en el master y en todos los nodos, cualquier mensaje por correo y por Telegram (también los del relevo y los críticos; se siguen apuntando en el monitor). Pide confirmación en una ventana y la contraseña del administrador, queda registrado en el log y se reactiva con el mismo botón. Las pruebas de Telegram con un token escrito a mano en el formulario siguen funcionando.',
+                    ],
+                    'fixed' => [
+                        'El escudo de bloqueos de Cloudflare no quitaba el proxy a los dominios que apuntan por CNAME a mortadelo.musedock.com o mortadelo.screenart.es (p. ej. finder.musedock.com): el servidor se resuelve a sí mismo como 127.0.1.1 (/etc/hosts), la sonda comprobaba «el origen» en su propia máquina y el escudo lo daba por no válido. Ahora el origen se resuelve por el DNS (con respaldo a 1.1.1.1 / 8.8.8.8) y se descartan IPs locales o privadas.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.413',
                 'date' => '2026-11-07',
                 'badge' => 'info',

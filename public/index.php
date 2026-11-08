@@ -599,6 +599,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/mcp/direct/save', 'DirectMcpController@save');
 \MuseDockPanel\Router::get('/settings/alerts', 'AlertsController@index');
 \MuseDockPanel\Router::post('/settings/alerts/save', 'AlertsController@save');
+\MuseDockPanel\Router::post('/settings/alerts/kill', 'AlertsController@kill');
 \MuseDockPanel\Router::get('/settings/witnesses', 'WitnessController@index');
 // Bloqueos de Cloudflare (CfGuardController)
 \MuseDockPanel\Router::get('/settings/cf-guard', 'CfGuardController@index');

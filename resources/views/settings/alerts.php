@@ -10,6 +10,50 @@
     <a href="/settings/notifications" class="btn btn-outline-light btn-sm"><i class="bi bi-envelope me-1"></i>Canales (correo, Telegram)</a>
 </div>
 
+<?php $killedAll = count($killed) > 0; ?>
+<div class="card mb-3" style="border-color:<?= $killedAll ? 'rgba(239,68,68,.55)' : 'rgba(148,163,184,.3)' ?>;">
+    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3 py-2">
+        <div class="small">
+            <?php if ($killedAll): ?>
+                <strong class="text-danger"><i class="bi bi-bell-slash-fill me-1"></i>Avisos DESCONECTADOS</strong>
+                <span class="text-muted">(<?= View::e(implode(' y ', array_map(fn($c) => \MuseDockPanel\Services\AlertPolicyService::CHANNELS[$c], $killed))) ?>): no sale ningún correo ni mensaje de Telegram, ni siquiera los del relevo. Se siguen apuntando en el monitor.</span>
+            <?php else: ?>
+                <strong><i class="bi bi-power me-1"></i>Interruptor general</strong>
+                <span class="text-muted">Corta de golpe todos los avisos por correo y por Telegram en todos los servidores.</span>
+            <?php endif; ?>
+        </div>
+        <button type="button" class="btn btn-sm <?= $killedAll ? 'btn-success' : 'btn-danger' ?>" data-bs-toggle="modal" data-bs-target="#killModal">
+            <i class="bi bi-<?= $killedAll ? 'bell' : 'bell-slash' ?> me-1"></i><?= $killedAll ? 'Reactivar todos los avisos' : 'Desconectar todos los avisos (Telegram y correo)' ?>
+        </button>
+    </div>
+</div>
+<div class="modal fade" id="killModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="POST" action="/settings/alerts/kill" class="modal-content">
+            <?= View::csrf() ?>
+            <input type="hidden" name="mode" value="<?= $killedAll ? 'on' : 'off' ?>">
+            <div class="modal-header">
+                <h5 class="modal-title"><?= $killedAll ? 'Reactivar los avisos' : 'Desconectar todos los avisos' ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body small">
+                <?php if ($killedAll): ?>
+                    <p>Volverán a salir los avisos por correo y Telegram en todos los servidores, con las reglas de más abajo.</p>
+                <?php else: ?>
+                    <p><strong class="text-danger">Dejará de salir TODO por correo y Telegram en el master y en todos los nodos</strong>, también los avisos del relevo, caídas y fallos críticos.
+                        Seguirán apuntándose en el monitor del panel. Acuérdate de reactivarlos después.</p>
+                <?php endif; ?>
+                <label class="form-label">Contraseña de administrador</label>
+                <input type="password" name="admin_password" class="form-control" required autocomplete="current-password">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-light btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-sm <?= $killedAll ? 'btn-success' : 'btn-danger' ?>"><?= $killedAll ? 'Reactivar' : 'Desconectar todo' ?></button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <?php if ($isSlave): ?>
     <div class="alert small py-2 px-3 mb-3" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);color:#e2e8f0;">
         <i class="bi bi-info-circle me-1" style="color:#38bdf8;"></i>

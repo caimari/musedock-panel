@@ -177,6 +177,21 @@ class AlertPolicyService
         return $out;
     }
 
+    /**
+     * Interruptor general: canales cortados del todo ('email', 'telegram'). Mientras estén aquí
+     * no sale NINGÚN mensaje por ellos (tampoco los del relevo ni los críticos). Se reparte a los nodos.
+     * @return string[]
+     */
+    public static function killedChannels(): array
+    {
+        return array_values(array_intersect(array_keys(self::CHANNELS), array_map('strval', self::json('alerts_kill_channels', []))));
+    }
+
+    public static function killed(string $channel): bool
+    {
+        return in_array($channel, self::killedChannels(), true);
+    }
+
     /** ¿Debe este aviso salir por ese canal? (Solo mira la elección por tipo, no si el canal está activo.) */
     public static function channelEnabled(string $type, string $channel): bool
     {
@@ -328,6 +343,7 @@ class AlertPolicyService
             'hardening_accepted' => self::hardeningAcceptedRaw(),
             'disk_overrides' => self::json('alerts_disk_overrides', []),
             'channels_off' => self::channelsOff(),
+            'kill_channels' => self::killedChannels(),
             'mail_node_after_minutes' => self::mailNodeAfterMinutes(),
             'system_watch_ignore' => self::systemWatchIgnore(),
         ];
@@ -419,6 +435,10 @@ class AlertPolicyService
                 }
             }
             Settings::set('alerts_system_watch_ignore', json_encode(array_values(array_unique($ig)), JSON_UNESCAPED_SLASHES));
+        }
+        if (array_key_exists('kill_channels', $p)) {
+            $k = array_values(array_intersect(array_keys(self::CHANNELS), array_map('strval', (array)$p['kill_channels'])));
+            Settings::set('alerts_kill_channels', json_encode($k));
         }
         if (array_key_exists('mail_node_after_minutes', $p)) {
             Settings::set('alerts_mail_node_after_minutes', (string)max(1, min(120, (int)$p['mail_node_after_minutes'])));

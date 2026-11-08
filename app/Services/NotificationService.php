@@ -240,6 +240,11 @@ class NotificationService
 
     public static function sendEmail(string $subject, string $body): bool
     {
+        // Interruptor general (Ajustes → Avisos → Desconectar todos los avisos)
+        if (AlertPolicyService::killed('email')) {
+            LogService::log('notify.killed', 'email', 'Correo no enviado (avisos desconectados): ' . $subject);
+            return false;
+        }
         $subject = self::tagSubject($subject);
         $method = Settings::get('notify_email_method', 'smtp');
         $to = self::getRecipientEmail();
@@ -592,6 +597,12 @@ class NotificationService
     /** $silent: llega sin sonido (avisos informativos). */
     public static function sendTelegram(string $message, ?string $token = null, ?string $chatId = null, ?string &$error = null, bool $silent = false): bool
     {
+        // Interruptor general; la prueba con un token escrito a mano en el formulario sí pasa.
+        if ($token === null && AlertPolicyService::killed('telegram')) {
+            LogService::log('notify.killed', 'telegram', 'Telegram no enviado (avisos desconectados)');
+            $error = 'avisos de Telegram desconectados desde Ajustes → Avisos';
+            return false;
+        }
         $chatId = $chatId ?? Settings::get('notify_telegram_chat_id', '');
         if ($token !== null) {
             $botToken = $token;

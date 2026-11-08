@@ -1,6 +1,7 @@
 <?php
 namespace MuseDockPanel\Controllers;
 
+use MuseDockPanel\Database;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
 use MuseDockPanel\Services\AlertPolicyService;
@@ -49,6 +50,7 @@ class AlertsController
             'hostHints' => array_values(array_unique(array_filter(array_merge($hosts, ['*'])))),
             'channels' => AlertPolicyService::activeChannels(),
             'channelsOff' => AlertPolicyService::channelsOff(),
+            'killed' => AlertPolicyService::killedChannels(),
             'diskDefault' => (float)Settings::get('monitor_alert_disk', '90'),
             'isSlave' => Settings::get('cluster_role', 'standalone') === 'slave',
             'masterUrl' => self::masterUrl(),
@@ -72,6 +74,41 @@ class AlertsController
             }
         }
         return '';
+    }
+
+    /** Corta (o vuelve a activar) de golpe todos los avisos por correo y Telegram. Pide la contraseña del admin. */
+    public function kill(): void
+    {
+        View::verifyCsrf();
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify((string)($_POST['admin_password'] ?? ''), $admin['password_hash'])) {
+            Flash::set('error', 'Contraseña incorrecta: no se ha cambiado nada.');
+            Router::redirect('/settings/alerts');
+            return;
+        }
+        $off = ($_POST['mode'] ?? '') === 'off';
+        $policy = ['kill_channels' => $off ? array_keys(AlertPolicyService::CHANNELS) : []];
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            $r = AlertPolicyService::saveViaMaster($policy);
+            $ok = !empty($r['ok']);
+            $msg = $ok ? '' : (string)$r['error'];
+            $copied = $ok ? (array)$r['copied'] : [];
+        } else {
+            AlertPolicyService::save($policy);
+            $copied = AlertPolicyService::pushToNodes();
+            $ok = true;
+            $msg = '';
+        }
+        LogService::log('alerts.policy', $off ? 'kill-on' : 'kill-off', ($off ? 'Todos los avisos por correo y Telegram DESCONECTADOS' : 'Avisos por correo y Telegram reactivados') . ' por el administrador');
+        if (!$ok) {
+            Flash::set('error', $msg);
+        } else {
+            $bad = array_filter($copied, static fn($v) => !str_starts_with((string)$v, 'copiadas'));
+            Flash::set($bad ? 'warning' : 'success', ($off ? 'Avisos por correo y Telegram desconectados' : 'Avisos por correo y Telegram reactivados')
+                . ($copied ? '; nodos: ' . implode(', ', array_map(static fn($k, $v) => "{$k} {$v}", array_keys($copied), $copied)) : '') . '.');
+        }
+        Router::redirect('/settings/alerts');
     }
 
     public function save(): void

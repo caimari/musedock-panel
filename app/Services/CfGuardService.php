@@ -512,7 +512,7 @@ class CfGuardService
         $name = strtolower((string) $r['name']);
         $isProxied = !empty($r['proxied']);
         $edge = $isProxied ? (implode(',', self::resolveA($name)) ?: (string) ($prev['edge_ips'] ?? '')) : (string) ($prev['edge_ips'] ?? '');
-        $origin = $r['type'] === 'A' ? (string) $r['content'] : (self::resolveA((string) $r['content'])[0] ?? null);
+        $origin = $r['type'] === 'A' ? (string) $r['content'] : (self::resolveOrigin((string) $r['content']) ?? null);
         Database::execute('DELETE FROM cf_guard_records WHERE record_id = :r', ['r' => $r['id']]);
         Database::execute('INSERT INTO cf_guard_records (account_name, zone_id, zone_name, record_id, name, type, content, proxied, ttl, edge_ips, edge_ips_probe, origin_ip, refreshed_at)
             VALUES (:a, :zi, :zn, :ri, :n, :t, :c, :p, :ttl, :e, :ep, :o, :at)', [
@@ -538,6 +538,43 @@ class CfGuardService
         $ips = @gethostbynamel($host);
 
         return $ips ? array_values(array_unique($ips)) : [];
+    }
+
+    /**
+     * IP pública de origen de un nombre. gethostbynamel() pasa por /etc/hosts, donde el propio servidor se resuelve a
+     * 127.0.1.1 (mortadelo.screenart.es): la sonda comprobaba entonces «el origen» en su propia máquina y el escudo no
+     * quitaba el proxy (finder.musedock.com). Se consulta el DNS y se descartan IPs locales o privadas.
+     */
+    private static function resolveOrigin(string $host): ?string
+    {
+        $ips = [];
+        foreach ((array) @dns_get_record($host, DNS_A) as $rec) {
+            if (!empty($rec['ip'])) {
+                $ips[] = $rec['ip'];
+            }
+        }
+        if (!$ips) {
+            $ips = self::resolveA($host);
+        }
+        $isPublic = fn(string $ip): bool => (bool) filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        foreach ($ips as $ip) {
+            if ($isPublic($ip)) {
+                return $ip;
+            }
+        }
+        // El resolvedor local también devuelve 127.0.1.1 (sirve /etc/hosts): se pregunta a un DNS público.
+        if (preg_match('/^[a-z0-9.-]+$/i', $host)) {
+            foreach (['1.1.1.1', '8.8.8.8'] as $ns) {
+                $out = (string) @shell_exec('dig +short +time=2 +tries=1 A ' . escapeshellarg($host) . ' @' . $ns . ' 2>/dev/null');
+                foreach (preg_split('/\s+/', trim($out)) ?: [] as $ip) {
+                    if ($isPublic($ip)) {
+                        return $ip;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /** Registros; edge_ips incluye las IPs vistas por las sondas desde su país. */
